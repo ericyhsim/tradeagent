@@ -554,7 +554,10 @@ table::-webkit-scrollbar{width:4px;}
       <div class="ch">
         <span class="ct">Signal history</span>
         <span class="badge" style="background:var(--bg3);color:var(--text2)" id="sigHistoryCount">last 10 sessions</span>
-        <button onclick="loadSignalHistory()" style="margin-left:auto;padding:5px 12px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:var(--rs);font-family:var(--mono);font-size:10px;cursor:pointer">↻ Refresh</button>
+        <div style="margin-left:auto;display:flex;gap:6px">
+          <button onclick="exportSignalsCsv()" style="padding:5px 12px;background:var(--bg3);color:var(--green);border:1px solid rgba(74,222,128,.3);border-radius:var(--rs);font-family:var(--mono);font-size:10px;cursor:pointer">⬇ Export CSV</button>
+          <button onclick="loadSignalHistory()" style="padding:5px 12px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:var(--rs);font-family:var(--mono);font-size:10px;cursor:pointer">↻ Refresh</button>
+        </div>
       </div>
       <div id="sigHistoryList" style="padding:8px;overflow-y:auto;max-height:500px">
         <div class="empty">Loading history…</div>
@@ -1308,6 +1311,11 @@ function historySignalRow(s) {
       <div style="color:${cc}">${conf}%</div>
       <div style="color:var(--text3)">${time}</div>
     </div>`;
+}
+
+function exportSignalsCsv(targetDate) {
+  const d = targetDate || new Date().toISOString().slice(0,10);
+  window.open(API + '/api/signals/export?target_date=' + d, '_blank');
 }
 
 async function loadSignalHistory() {

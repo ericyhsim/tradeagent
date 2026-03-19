@@ -28,7 +28,7 @@ POST /api/options/orders            place option order
 WS   /ws/live                       real-time stream
 """
 
-import os, asyncio, logging, re, json
+import os, asyncio, logging, re, json, csv, io
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, date
 from pathlib import Path
@@ -679,6 +679,100 @@ async def monitor_exits():
             log.error(f"monitor_exits error: {e}")
 
 
+# ── Daily CSV export ──────────────────────────────
+
+# Columns written to every daily CSV (in order)
+_CSV_COLUMNS = [
+    "session_date", "timestamp", "signal_id",
+    "symbol", "setup", "direction",
+    "entry", "stop", "target",
+    "confidence_pct", "consensus_pct", "risk_reward",
+    "timeframe",
+    "agent_momentum", "agent_quant", "agent_options_flow",
+    "agent_sentiment", "agent_fundamental", "agent_macro", "agent_stat_arb",
+    "signals_text",
+]
+
+def _build_csv_row(sig: dict) -> dict:
+    """Flatten one signal dict into a CSV-ready row."""
+    # Pull per-agent directions from agent_views list
+    agent_dirs = {v.get("agent", ""): v.get("direction", "neutral")
+                  for v in sig.get("agent_views", [])}
+    signals_text = " | ".join(
+        s for s in sig.get("signals", []) if isinstance(s, str)
+    )
+    return {
+        "session_date":       sig.get("session_date", ""),
+        "timestamp":          sig.get("timestamp", ""),
+        "signal_id":          sig.get("signal_id", ""),
+        "symbol":             sig.get("symbol", ""),
+        "setup":              sig.get("setup", ""),
+        "direction":          sig.get("direction", ""),
+        "entry":              sig.get("entry", ""),
+        "stop":               sig.get("stop", ""),
+        "target":             sig.get("target", ""),
+        "confidence_pct":     sig.get("confidence_pct", round((sig.get("confidence", 0)) * 100)),
+        "consensus_pct":      sig.get("consensus_pct", round((sig.get("consensus_score", 0)) * 100)),
+        "risk_reward":        sig.get("risk_reward", ""),
+        "timeframe":          sig.get("timeframe", ""),
+        "agent_momentum":     agent_dirs.get("momentum", ""),
+        "agent_quant":        agent_dirs.get("quant", ""),
+        "agent_options_flow": agent_dirs.get("options_flow", ""),
+        "agent_sentiment":    agent_dirs.get("sentiment", ""),
+        "agent_fundamental":  agent_dirs.get("fundamental", ""),
+        "agent_macro":        agent_dirs.get("macro", ""),
+        "agent_stat_arb":     agent_dirs.get("stat_arb", ""),
+        "signals_text":       signals_text,
+    }
+
+def export_daily_csv(target_date: str | None = None) -> Path:
+    """
+    Write a CSV for target_date (ISO string, defaults to today) using
+    signals stored in signal_history.json.  Returns the Path written.
+    """
+    if target_date is None:
+        target_date = date.today().isoformat()
+
+    history   = _load_signal_history()
+    day_sigs  = [s for s in history if s.get("session_date") == target_date]
+
+    _LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    csv_path  = _LOGS_DIR / f"signals_{target_date}.csv"
+
+    with csv_path.open("w", newline="") as fh_:
+        writer = csv.DictWriter(fh_, fieldnames=_CSV_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for sig in day_sigs:
+            writer.writerow(_build_csv_row(sig))
+
+    log.info(f"Daily CSV written: {csv_path} ({len(day_sigs)} signals)")
+    add_log("System", f"Daily CSV exported: signals_{target_date}.csv ({len(day_sigs)} signals)")
+    return csv_path
+
+
+async def daily_csv_scheduler():
+    """
+    Fires once per weekday at 16:05 ET (5 min after market close).
+    Exports the day's signals to logs/signals_YYYY-MM-DD.csv.
+    Also catches up if the server was offline during the close window.
+    """
+    _last_export: str | None = None
+    while True:
+        await asyncio.sleep(60)
+        now_et = datetime.now(ET)
+        today  = now_et.date().isoformat()
+        # Weekday only (Mon=0 … Fri=4), between 16:05 and 16:30 ET
+        if (now_et.weekday() < 5
+                and now_et.hour == 16
+                and 5 <= now_et.minute <= 30
+                and _last_export != today):
+            try:
+                export_daily_csv(today)
+                _last_export = today
+            except Exception as e:
+                log.error(f"daily_csv_scheduler error: {e}")
+
+
 # ── Lifecycle ─────────────────────────────────────
 
 @asynccontextmanager
@@ -691,6 +785,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(run_scan())
     asyncio.create_task(scan_scheduler())
     asyncio.create_task(monitor_exits())
+    asyncio.create_task(daily_csv_scheduler())
     yield
     add_log("System", "TradeAgent shutting down")
 
@@ -754,6 +849,27 @@ async def get_signal_history():
         for d in sorted(by_date.keys(), reverse=True)
     ]
     return {"sessions": sessions, "total": len(history)}
+
+@app.get("/api/signals/export")
+async def export_signals_csv(target_date: str | None = None):
+    """
+    Trigger an immediate CSV export for the given date (YYYY-MM-DD, defaults
+    to today).  Returns the file as a download attachment.
+    """
+    d = target_date or date.today().isoformat()
+    try:
+        csv_path = await asyncio.to_thread(export_daily_csv, d)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if not csv_path.exists():
+        return JSONResponse({"error": "No signals found for that date"}, status_code=404)
+    from fastapi.responses import FileResponse as _FR
+    return _FR(
+        path=str(csv_path),
+        media_type="text/csv",
+        filename=csv_path.name,
+        headers={"Content-Disposition": f'attachment; filename="{csv_path.name}"'},
+    )
 
 @app.get("/api/quote/{symbol}")
 async def get_quote_endpoint(symbol: str):
