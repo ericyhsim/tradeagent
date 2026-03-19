@@ -28,7 +28,7 @@ POST /api/options/orders            place option order
 WS   /ws/live                       real-time stream
 """
 
-import os, asyncio, logging, re
+import os, asyncio, logging, re, json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, date
 from pathlib import Path
@@ -109,6 +109,57 @@ state = {
     "scale_targets":  {},   # option_symbol → ScaleTargets (for tiered exit monitoring)
     "pending_closes": {},   # option_symbol → {order_id, qty, type, placed_at}
 }
+
+# ── Signal history persistence ────────────────────
+# Signals are grouped by trading date and stored in logs/signal_history.json.
+# We keep the last 10 distinct trading session dates.
+
+_LOGS_DIR          = Path(__file__).parent.parent / "logs"
+_SIGNAL_HISTORY_FILE = _LOGS_DIR / "signal_history.json"
+
+def _load_signal_history() -> list[dict]:
+    """Load persisted signal history from disk; returns [] on any error."""
+    try:
+        if _SIGNAL_HISTORY_FILE.exists():
+            data = json.loads(_SIGNAL_HISTORY_FILE.read_text())
+            return data if isinstance(data, list) else []
+    except Exception as e:
+        log.warning(f"Could not load signal history: {e}")
+    return []
+
+def _save_signal_history(history: list[dict]) -> None:
+    try:
+        _LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        _SIGNAL_HISTORY_FILE.write_text(json.dumps(history, default=str))
+    except Exception as e:
+        log.warning(f"Could not save signal history: {e}")
+
+def _append_to_history(alert_dict: dict) -> None:
+    """
+    Add a signal to the persistent history, tagged with today's date.
+    Keeps only the last 10 distinct trading session dates.
+    """
+    today = date.today().isoformat()
+    history: list[dict] = _load_signal_history()
+
+    entry = {**alert_dict, "session_date": today}
+    history.append(entry)
+
+    # Deduplicate by signal_id to avoid double-counting on server restart
+    seen_ids: set = set()
+    unique = []
+    for h in history:
+        sid = h.get("signal_id") or id(h)
+        if sid not in seen_ids:
+            seen_ids.add(sid)
+            unique.append(h)
+
+    # Keep only signals from the last 10 distinct session dates
+    all_dates = sorted({h["session_date"] for h in unique}, reverse=True)
+    keep_dates = set(all_dates[:10])
+    unique = [h for h in unique if h.get("session_date") in keep_dates]
+
+    _save_signal_history(unique)
 
 
 def add_log(agent: str, message: str, level: str = "info"):
@@ -382,6 +433,9 @@ async def run_scan():
                     if quote and quote.get("c"):
                         ad["current_price"] = round(float(quote["c"]), 2)
                     new_alerts.append(ad)
+
+                    # Persist to 10-session signal history log
+                    _append_to_history(ad)
 
                     # Record prediction for feedback loop
                     state["signal_log"][symbol] = {
@@ -682,6 +736,24 @@ async def get_status():
 @app.get("/api/signals")
 async def get_signals(limit: int = 50):
     return {"signals": state["alerts"][:limit], "last_scan": state["last_scan"]}
+
+@app.get("/api/signals/history")
+async def get_signal_history():
+    """
+    Returns all signals from the last 10 trading sessions, grouped by date.
+    Most recent session first.
+    """
+    history = _load_signal_history()
+    # Group by session_date
+    from collections import defaultdict
+    by_date: dict[str, list] = defaultdict(list)
+    for sig in history:
+        by_date[sig.get("session_date", "unknown")].append(sig)
+    sessions = [
+        {"date": d, "signals": by_date[d]}
+        for d in sorted(by_date.keys(), reverse=True)
+    ]
+    return {"sessions": sessions, "total": len(history)}
 
 @app.get("/api/quote/{symbol}")
 async def get_quote_endpoint(symbol: str):

@@ -540,12 +540,24 @@ table::-webkit-scrollbar{width:4px;}
 
     <div class="card">
       <div class="ch">
-        <span class="ct">Signal history</span>
+        <span class="ct">Today's signals</span>
         <span class="badge bg" id="sigFullCount">0 signals today</span>
       </div>
       <div style="padding:6px 8px 0"><div class="sig-hdr sig-cols" style="padding-left:12px"><span>Ticker</span><span>Setup</span><span>Entry</span><span>Target / Stop</span><span>Conf</span><span>R:R</span><span>Action</span></div></div>
       <div id="sigFullList" style="padding:8px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:calc(100vh - 240px);">
         <div class="empty">No signals yet — scan in progress</div>
+      </div>
+    </div>
+
+    <!-- Signal history (last 10 sessions) -->
+    <div class="card" style="margin-top:16px">
+      <div class="ch">
+        <span class="ct">Signal history</span>
+        <span class="badge" style="background:var(--bg3);color:var(--text2)" id="sigHistoryCount">last 10 sessions</span>
+        <button onclick="loadSignalHistory()" style="margin-left:auto;padding:5px 12px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:var(--rs);font-family:var(--mono);font-size:10px;cursor:pointer">↻ Refresh</button>
+      </div>
+      <div id="sigHistoryList" style="padding:8px;overflow-y:auto;max-height:500px">
+        <div class="empty">Loading history…</div>
       </div>
     </div>
 
@@ -1025,7 +1037,7 @@ function showView(el) {
   if (name === 'positions') refreshPositionsView();
   if (name === 'options') onOptViewOpen();
   if (name === 'intelligence') loadIntelligence();
-  if (name === 'signals') loadAgentViews();
+  if (name === 'signals') { loadAgentViews(); loadSignalHistory(); }
   if (name === 'backtest') onBacktestViewOpen();
 }
 
@@ -1272,6 +1284,64 @@ function renderSignals(signals, listId) {
   if (!el) return;
   if (!signals.length) { el.innerHTML = '<div class="empty">No signals yet</div>'; return; }
   el.innerHTML = signals.map(signalRow).join('');
+}
+
+// ── Signal history ─────────────────────────────────
+function historySignalRow(s) {
+  const call   = s.direction === 'call';
+  const c      = call ? 'var(--green)' : 'var(--red)';
+  const conf   = s.confidence_pct || Math.round((s.confidence || 0) * 100);
+  const cc     = conf >= 80 ? 'var(--green)' : conf >= 65 ? 'var(--amber)' : 'var(--red)';
+  const setup  = (s.setup || '').replace(/_/g, ' ');
+  const rr     = s.risk_reward ? '1:' + s.risk_reward : '—';
+  const time   = s.timestamp ? new Date(s.timestamp).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}) : '—';
+  const dirBadge = call
+    ? `<span class="badge bg" style="font-size:9px">CALL ↗</span>`
+    : `<span class="badge br" style="font-size:9px">PUT ↘</span>`;
+  return `
+    <div style="display:grid;grid-template-columns:80px 70px 90px 90px 90px 55px 45px;align-items:center;padding:7px 10px;border-radius:var(--rs);background:var(--bg3);border:1px solid var(--border);gap:8px;font-family:var(--mono);font-size:11px;">
+      <div style="font-weight:700;color:${c}">${s.symbol}</div>
+      <div>${dirBadge}</div>
+      <div style="color:var(--text2)">${setup.charAt(0).toUpperCase()+setup.slice(1)}</div>
+      <div>E <strong>$${(s.entry||0).toFixed(2)}</strong></div>
+      <div><span style="color:var(--green)">T $${(s.target||0).toFixed(2)}</span> <span style="color:var(--text3)">S $${(s.stop||0).toFixed(2)}</span></div>
+      <div style="color:${cc}">${conf}%</div>
+      <div style="color:var(--text3)">${time}</div>
+    </div>`;
+}
+
+async function loadSignalHistory() {
+  const el = document.getElementById('sigHistoryList');
+  const badge = document.getElementById('sigHistoryCount');
+  try {
+    const d = await fetch(API + '/api/signals/history').then(r => r.json());
+    const sessions = d.sessions || [];
+    if (!sessions.length) {
+      el.innerHTML = '<div class="empty">No historical signals yet — check back after market open</div>';
+      return;
+    }
+    badge.textContent = `${d.total} signals · ${sessions.length} sessions`;
+    el.innerHTML = sessions.map(sess => {
+      const dt    = new Date(sess.date + 'T12:00:00');
+      const label = dt.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+      const rows  = sess.signals.map(historySignalRow).join('');
+      return `
+        <details open style="margin-bottom:10px">
+          <summary style="cursor:pointer;padding:6px 4px;font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text2);list-style:none;display:flex;align-items:center;gap:8px">
+            <span style="color:var(--blue)">▸</span> ${label}
+            <span class="badge" style="background:var(--bg3);color:var(--text3)">${sess.signals.length} signal${sess.signals.length!==1?'s':''}</span>
+          </summary>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:6px 0 0 12px">
+            <div style="display:grid;grid-template-columns:80px 70px 90px 90px 90px 55px 45px;padding:4px 10px;font-size:9px;color:var(--text3);font-family:var(--mono);gap:8px">
+              <span>SYMBOL</span><span>DIR</span><span>SETUP</span><span>ENTRY</span><span>TARGET/STOP</span><span>CONF</span><span>TIME</span>
+            </div>
+            ${rows}
+          </div>
+        </details>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="empty" style="color:var(--red)">Failed to load history</div>';
+  }
 }
 
 function filterSignals() {
