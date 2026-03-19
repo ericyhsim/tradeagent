@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+yfinance
+finnhub-python
+requests
+pandas
+numpy
+python-dotenv
+pydantic

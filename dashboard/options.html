@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TradeAgent — Options Desk</title>
+<style>
+  :root {
+    --bg:        #0d0f14;
+    --panel:     #13161e;
+    --border:    #1f2435;
+    --accent:    #4f8ef7;
+    --green:     #22c55e;
+    --red:       #ef4444;
+    --yellow:    #f59e0b;
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --sidebar-w: 200px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden; font-size: 13px; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: var(--sidebar-w); background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  #sidebar .logo {
+    padding: 18px 16px 14px; font-size: 15px; font-weight: 700; color: var(--accent);
+    letter-spacing: .04em; border-bottom: 1px solid var(--border);
+  }
+  #sidebar .logo span { color: var(--muted); font-weight: 400; }
+  #sidebar nav { flex: 1; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+  #sidebar nav a {
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+    border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 12.5px;
+    transition: background .15s, color .15s;
+  }
+  #sidebar nav a:hover { background: rgba(79,142,247,.1); color: var(--text); }
+  #sidebar nav a.active { background: rgba(79,142,247,.15); color: var(--accent); }
+  #sidebar nav a svg { width: 15px; height: 15px; flex-shrink: 0; }
+  #sidebar .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: auto;
+  }
+  #sidebar .status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #topbar {
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px;
+  }
+  #topbar h1 { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; }
+  #topbar .pill {
+    padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    background: rgba(79,142,247,.15); color: var(--accent); border: 1px solid rgba(79,142,247,.3);
+  }
+  #topbar .bal { color: var(--muted); font-size: 12px; }
+  #topbar .bal span { color: var(--green); font-weight: 600; }
+
+  #content { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* ── Controls ── */
+  .controls-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px;
+  }
+  .controls-bar label { color: var(--muted); font-size: 11px; margin-right: 4px; }
+  .controls-bar select, .controls-bar input {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 5px; padding: 5px 10px; font-family: inherit; font-size: 12px; cursor: pointer;
+  }
+  .controls-bar select:focus, .controls-bar input:focus { outline: none; border-color: var(--accent); }
+  .btn {
+    padding: 6px 14px; border-radius: 5px; border: none; font-family: inherit;
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85; }
+  .btn:active { opacity: .7; }
+  .btn-blue  { background: var(--accent); color: #fff; }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-red   { background: var(--red); color: #fff; }
+  .btn-ghost { background: rgba(255,255,255,.06); color: var(--text); }
+
+  /* ── Panel ── */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 600; color: var(--accent);
+  }
+  .panel-header span { color: var(--muted); font-weight: 400; }
+
+  /* ── Signals strip ── */
+  #signal-strip { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 16px; min-height: 44px; align-items: center; }
+  .sig-chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+    border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: opacity .15s; border: 1px solid transparent;
+  }
+  .sig-chip:hover { opacity: .85; }
+  .sig-chip.bull { background: rgba(34,197,94,.12); color: var(--green); border-color: rgba(34,197,94,.25); }
+  .sig-chip.bear { background: rgba(239,68,68,.12); color: var(--red); border-color: rgba(239,68,68,.25); }
+
+  /* ── Quote bar ── */
+  #quote-bar {
+    display: flex; gap: 24px; padding: 10px 16px; border-bottom: 1px solid var(--border);
+    align-items: baseline; flex-wrap: wrap;
+  }
+  #quote-bar .q-price { font-size: 22px; font-weight: 700; }
+  #quote-bar .q-stat { color: var(--muted); font-size: 11px; }
+  #quote-bar .q-stat b { color: var(--text); font-weight: 500; }
+  #quote-bar .q-chg.pos { color: var(--green); }
+  #quote-bar .q-chg.neg { color: var(--red); }
+
+  /* ── Chain table ── */
+  .chain-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    padding: 7px 10px; text-align: right; font-size: 10.5px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  th.strike-col, td.strike-col { text-align: center; background: rgba(79,142,247,.06); }
+  th:first-child, td:first-child { text-align: left; }
+  td {
+    padding: 6px 10px; text-align: right; border-bottom: 1px solid rgba(31,36,53,.7);
+    font-size: 12px; white-space: nowrap;
+  }
+  tr:hover td { background: rgba(255,255,255,.025); }
+  td.strike-col { font-weight: 700; color: var(--text); font-size: 13px; }
+  td.atm td { background: rgba(79,142,247,.07); }
+  tr.atm-row td { background: rgba(79,142,247,.07); }
+  .green { color: var(--green); }
+  .red   { color: var(--red); }
+  .muted { color: var(--muted); }
+  .itm   { color: var(--accent); }
+
+  /* ── Positions table ── */
+  #pos-table td:first-child { font-weight: 600; }
+  .pl-pos { color: var(--green); font-weight: 600; }
+  .pl-neg { color: var(--red); font-weight: 600; }
+
+  /* ── Order modal ── */
+  #modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.6); z-index: 100; align-items: center; justify-content: center;
+  }
+  #modal-overlay.open { display: flex; }
+  #modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 24px; width: 380px; max-width: 95vw;
+  }
+  #modal h2 { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 16px; }
+  .form-row { margin-bottom: 12px; }
+  .form-row label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .form-row input, .form-row select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 5px; padding: 7px 10px; font-family: inherit; font-size: 12px;
+  }
+  .form-row input:focus, .form-row select:focus { outline: none; border-color: var(--accent); }
+  .modal-footer { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
+  #modal-contract { font-size: 11px; color: var(--muted); margin-bottom: 14px; word-break: break-all; }
+  #modal-contract b { color: var(--accent); }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px; padding: 10px 16px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 7px;
+    font-size: 12px; color: var(--text); max-width: 320px; z-index: 200;
+    transition: opacity .3s; opacity: 0; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #toast.ok   { border-color: var(--green); }
+  #toast.err  { border-color: var(--red); }
+
+  .empty { color: var(--muted); font-size: 12px; padding: 16px; text-align: center; }
+  .loading { color: var(--muted); font-size: 12px; padding: 20px; text-align: center; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{ opacity:.4 } 50%{ opacity:1 } }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div class="logo">Trade<span>Agent</span></div>
+  <nav>
+    <a href="/" title="Dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      Dashboard
+    </a>
+    <a href="/options" class="active" title="Options Desk">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Options Desk
+      <div class="status-dot live" id="ws-dot" title="WebSocket"></div>
+    </a>
+  </nav>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <!-- Topbar -->
+  <div id="topbar">
+    <h1>Options Desk</h1>
+    <div class="pill">PAPER</div>
+    <div class="bal">Equity: <span id="top-equity">—</span></div>
+    <div class="bal">Day P&L: <span id="top-daypl">—</span></div>
+  </div>
+
+  <!-- Content -->
+  <div id="content">
+
+    <!-- Signals strip -->
+    <div class="panel">
+      <div class="panel-header">
+        Active Signals
+        <span id="sig-count">0 signals</span>
+      </div>
+      <div id="signal-strip">
+        <span class="muted" style="font-size:11px;padding:4px 6px">No signals — waiting for scan...</span>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-bar">
+      <label>Symbol</label>
+      <select id="sel-symbol">
+        <option value="">— select —</option>
+        <option>AAPL</option><option>NVDA</option><option>TSLA</option>
+        <option>MSFT</option><option>META</option><option>AMZN</option>
+        <option>GOOGL</option><option>SPY</option><option>QQQ</option>
+        <option>AMD</option><option>NFLX</option><option>COIN</option>
+        <option>PLTR</option><option>SMCI</option><option>ARM</option>
+      </select>
+
+      <label>Expiration</label>
+      <select id="sel-exp" disabled>
+        <option value="">— load symbol first —</option>
+      </select>
+
+      <button class="btn btn-blue" id="btn-load-chain" onclick="loadChain()">Load Chain</button>
+      <button class="btn btn-ghost" id="btn-refresh-pos" onclick="loadPositions()">Refresh Positions</button>
+
+      <span id="chain-status" style="color:var(--muted);font-size:11px;margin-left:auto"></span>
+    </div>
+
+    <!-- Chain panel -->
+    <div class="panel" id="chain-panel">
+      <div class="panel-header">
+        Options Chain
+        <span id="chain-header-info">Select symbol and expiration</span>
+      </div>
+      <div id="quote-bar" style="display:none">
+        <div>
+          <div class="q-price" id="q-last">—</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:1px" id="q-sym-label"></div>
+        </div>
+        <div class="q-stat">Change <b class="q-chg" id="q-chg">—</b></div>
+        <div class="q-stat">High <b id="q-high">—</b></div>
+        <div class="q-stat">Low <b id="q-low">—</b></div>
+        <div class="q-stat">Volume <b id="q-vol">—</b></div>
+      </div>
+      <div class="chain-wrap" id="chain-wrap">
+        <div class="empty">Select a symbol and expiration, then click Load Chain.</div>
+      </div>
+    </div>
+
+    <!-- Open Options Positions -->
+    <div class="panel">
+      <div class="panel-header">
+        Open Options Positions
+        <span id="pos-count">—</span>
+      </div>
+      <div class="chain-wrap">
+        <table id="pos-table">
+          <thead>
+            <tr>
+              <th>Contract</th>
+              <th>Side</th>
+              <th>Qty</th>
+              <th>Cost</th>
+              <th>Price</th>
+              <th>Mkt Value</th>
+              <th>P&L</th>
+              <th>P&L %</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="pos-tbody">
+            <tr><td colspan="9" class="empty">Loading positions...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- Order Modal -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h2 id="modal-title">Place Order</h2>
+    <div id="modal-contract"></div>
+    <div class="form-row">
+      <label>Side</label>
+      <select id="modal-side">
+        <option value="buy_to_open">Buy to Open</option>
+        <option value="sell_to_open">Sell to Open</option>
+        <option value="buy_to_close">Buy to Close</option>
+        <option value="sell_to_close">Sell to Close</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Quantity (contracts)</label>
+      <input type="number" id="modal-qty" value="1" min="1" />
+    </div>
+    <div class="form-row">
+      <label>Order Type</label>
+      <select id="modal-type">
+        <option value="limit">Limit</option>
+        <option value="market">Market</option>
+      </select>
+    </div>
+    <div class="form-row" id="modal-price-row">
+      <label>Limit Price</label>
+      <input type="number" id="modal-price" step="0.01" min="0.01" placeholder="0.00" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-green" id="modal-submit" onclick="submitOrder()">Submit Order</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+/* ── State ── */
+let currentSymbol = '';
+let currentExpiration = '';
+let currentChain = [];
+let currentQuote = null;
+let modalContract = null;
+
+/* ── WebSocket ── */
+const dot = document.getElementById('ws-dot');
+let ws, wsRetry = 0;
+function connectWS() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen  = () => { dot.className = 'status-dot live'; wsRetry = 0; };
+  ws.onclose = () => {
+    dot.className = 'status-dot';
+    const delay = Math.min(30000, 2000 * (++wsRetry));
+    setTimeout(connectWS, delay);
+  };
+  ws.onmessage = e => {
+    try { handleMsg(JSON.parse(e.data)); } catch(_) {}
+  };
+}
+function handleMsg(m) {
+  if (m.type === 'init' || m.type === 'balance') updateTopBar(m.data || m);
+  if (m.type === 'alert') ingestSignal(m.data);
+  if (m.type === 'init' && m.data?.alerts) {
+    m.data.alerts.forEach(a => ingestSignal(a));
+  }
+  if (m.type === 'trade_placed' || m.type === 'position_closed') {
+    toast('Position updated — refreshing...', 'ok');
+    loadPositions();
+  }
+}
+connectWS();
+
+/* ── Top bar ── */
+function updateTopBar(d) {
+  if (d.total_equity != null) {
+    document.getElementById('top-equity').textContent = fmt$(d.total_equity);
+  }
+  if (d.day_pl != null) {
+    const el = document.getElementById('top-daypl');
+    el.textContent = (d.day_pl >= 0 ? '+' : '') + fmt$(d.day_pl);
+    el.style.color = d.day_pl >= 0 ? 'var(--green)' : 'var(--red)';
+  }
+}
+
+/* ── Signals ── */
+const signals = {};
+function ingestSignal(a) {
+  if (!a || !a.symbol) return;
+  signals[a.symbol + a.setup] = a;
+  renderSignals();
+}
+function renderSignals() {
+  const strip = document.getElementById('signal-strip');
+  const keys = Object.keys(signals);
+  document.getElementById('sig-count').textContent = keys.length + ' signal' + (keys.length !== 1 ? 's' : '');
+  if (!keys.length) {
+    strip.innerHTML = '<span class="muted" style="font-size:11px;padding:4px 6px">No signals — waiting for scan...</span>';
+    return;
+  }
+  strip.innerHTML = keys.map(k => {
+    const a = signals[k];
+    const cls = (a.direction || '').toLowerCase() === 'bullish' ? 'bull' : 'bear';
+    return `<div class="sig-chip ${cls}" onclick="loadSymbolFromSignal('${a.symbol}','${a.direction}')">
+      ${a.symbol} · ${a.setup || ''} <span style="opacity:.7;font-size:10px">${a.direction || ''}</span>
+    </div>`;
+  }).join('');
+}
+function loadSymbolFromSignal(sym, dir) {
+  const sel = document.getElementById('sel-symbol');
+  sel.value = sym;
+  currentSymbol = sym;
+  loadExpirations();
+}
+
+/* ── Expirations ── */
+async function loadExpirations() {
+  const sym = document.getElementById('sel-symbol').value;
+  if (!sym) return;
+  currentSymbol = sym;
+  const expSel = document.getElementById('sel-exp');
+  expSel.innerHTML = '<option>Loading...</option>';
+  expSel.disabled = true;
+  document.getElementById('chain-status').textContent = 'Fetching expirations...';
+  try {
+    const res = await fetch(`/api/options/expirations/${sym}`);
+    const data = await res.json();
+    const dates = data.expirations || [];
+    expSel.innerHTML = dates.length
+      ? dates.map(d => `<option value="${d}">${d}</option>`).join('')
+      : '<option value="">No expirations available</option>';
+    expSel.disabled = false;
+    document.getElementById('chain-status').textContent = dates.length + ' expirations';
+    // Auto-pick nearest 7-35 day expiration
+    const now = Date.now();
+    const best = dates.find(d => {
+      const diff = (new Date(d) - now) / 86400000;
+      return diff >= 5 && diff <= 45;
+    });
+    if (best) expSel.value = best;
+  } catch(err) {
+    expSel.innerHTML = '<option value="">Error loading expirations</option>';
+    document.getElementById('chain-status').textContent = 'Error: ' + err.message;
+  }
+}
+document.getElementById('sel-symbol').addEventListener('change', loadExpirations);
+
+/* ── Quote ── */
+async function loadQuote(sym) {
+  try {
+    const res = await fetch(`/api/quote/${sym}`);
+    if (!res.ok) return;
+    const q = await res.json();
+    currentQuote = q;
+    const bar = document.getElementById('quote-bar');
+    bar.style.display = 'flex';
+    document.getElementById('q-last').textContent = fmt$(q.c || q.last || 0);
+    document.getElementById('q-sym-label').textContent = sym;
+    const chg = q.change_pct || 0;
+    const chgEl = document.getElementById('q-chg');
+    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    chgEl.className = 'q-chg ' + (chg >= 0 ? 'pos' : 'neg');
+    document.getElementById('q-high').textContent = fmt$(q.h || 0);
+    document.getElementById('q-low').textContent  = fmt$(q.l || 0);
+    document.getElementById('q-vol').textContent  = fmtN(q.v || 0);
+  } catch(_) {}
+}
+
+/* ── Chain ── */
+async function loadChain() {
+  const sym = document.getElementById('sel-symbol').value;
+  const exp = document.getElementById('sel-exp').value;
+  if (!sym || !exp) { toast('Select symbol and expiration first', 'err'); return; }
+  currentSymbol = sym;
+  currentExpiration = exp;
+  document.getElementById('chain-status').textContent = 'Loading chain...';
+  document.getElementById('chain-wrap').innerHTML = '<div class="loading">Loading options chain...</div>';
+  document.getElementById('chain-header-info').textContent = `${sym} · ${exp}`;
+  loadQuote(sym);
+  try {
+    const res = await fetch(`/api/options/chain/${sym}?expiration=${exp}`);
+    const data = await res.json();
+    const calls = data.calls || [];
+    const puts  = data.puts  || [];
+    const chain = [...calls, ...puts];
+    currentChain = chain;
+    currentQuote = currentQuote || {};
+    if (data.spot) currentQuote.c = data.spot;
+    document.getElementById('chain-status').textContent = chain.length + ' contracts loaded';
+    renderChain(calls, puts, data.spot || 0, sym);
+  } catch(err) {
+    document.getElementById('chain-wrap').innerHTML = `<div class="empty">Error: ${err.message}</div>`;
+  }
+}
+
+function renderChain(callsArr, putsArr, spot, sym) {
+  if (!callsArr.length && !putsArr.length) {
+    document.getElementById('chain-wrap').innerHTML = '<div class="empty">No contracts available for this expiration.</div>';
+    return;
+  }
+  // Index by strike
+  const calls = {}, puts = {};
+  callsArr.forEach(o => { calls[o.strike] = o; });
+  putsArr.forEach(o  => { puts[o.strike]  = o; });
+  const allStrikes = new Set([...callsArr.map(o=>o.strike), ...putsArr.map(o=>o.strike)]);
+  const strikes = [...allStrikes].sort((a,b) => a-b);
+
+  const thead = `<thead>
+    <tr>
+      <th style="text-align:left">CALL</th>
+      <th>Bid</th><th>Ask</th><th>IV</th><th>Delta</th><th>OI</th><th>Vol</th>
+      <th class="strike-col">Strike</th>
+      <th style="text-align:left">PUT</th>
+      <th>Bid</th><th>Ask</th><th>IV</th><th>Delta</th><th>OI</th><th>Vol</th>
+      <th></th>
+    </tr>
+  </thead>`;
+
+  const rows = strikes.map(strike => {
+    const c = calls[strike];
+    const p = puts[strike];
+    const isATM = spot > 0 && Math.abs(strike - spot) / spot < 0.02;
+    const cItm = spot > 0 && strike < spot;
+    const pItm = spot > 0 && strike > spot;
+
+    function optCells(o, isItm) {
+      if (!o) return '<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>';
+      const iv = o.greeks?.mid_iv || o.implied_volatility || 0;
+      const delta = o.greeks?.delta ?? '—';
+      const oi = o.open_interest || 0;
+      const vol = o.volume || 0;
+      const bid = o.bid ?? '—';
+      const ask = o.ask ?? '—';
+      const cls = isItm ? 'itm' : '';
+      return `<td class="${cls}">${fmt$(bid)}</td><td class="${cls}">${fmt$(ask)}</td>` +
+             `<td>${iv ? (iv*100).toFixed(1)+'%' : '—'}</td>` +
+             `<td>${delta !== '—' ? Number(delta).toFixed(3) : '—'}</td>` +
+             `<td class="muted">${fmtN(oi)}</td><td class="muted">${fmtN(vol)}</td>`;
+    }
+
+    const callLabel = c ? `<span class="${cItm?'itm':''}">${sym} $${strike}C</span>` : '<span class="muted">—</span>';
+    const putLabel  = p ? `<span class="${pItm?'itm':''}">${sym} $${strike}P</span>` : '<span class="muted">—</span>';
+
+    const callBuy = c
+      ? `<button class="btn btn-green" style="padding:3px 8px;font-size:11px" onclick="openModal('${c.symbol}','buy_to_open',${c.ask||0})">BUY</button>`
+      : '';
+    const putBuy = p
+      ? `<button class="btn btn-red" style="padding:3px 8px;font-size:11px" onclick="openModal('${p.symbol}','buy_to_open',${p.ask||0})">BUY</button>`
+      : '';
+
+    return `<tr class="${isATM?'atm-row':''}">
+      <td style="text-align:left">${callLabel} ${callBuy}</td>
+      ${optCells(c, cItm)}
+      <td class="strike-col">${isATM?'<b>':''}${strike}${isATM?'</b>':''}</td>
+      <td style="text-align:left">${putLabel} ${putBuy}</td>
+      ${optCells(p, pItm)}
+      <td></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('chain-wrap').innerHTML =
+    `<table>${thead}<tbody>${rows}</tbody></table>`;
+}
+
+/* ── Positions ── */
+async function loadPositions() {
+  try {
+    const res = await fetch('/api/positions');
+    const data = await res.json();
+    const positions = (data.positions || []).filter(p => p.is_option);
+    document.getElementById('pos-count').textContent = positions.length + ' open';
+    const tbody = document.getElementById('pos-tbody');
+    if (!positions.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">No open options positions.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = positions.map(p => {
+      const pl    = p.unrealized_pl || 0;
+      const plPct = p.unrealized_pl_pct || 0;
+      const plCls = pl >= 0 ? 'pl-pos' : 'pl-neg';
+      const display = parseOCC(p.symbol);
+      const side = p.quantity > 0 ? 'Long' : 'Short';
+      return `<tr>
+        <td title="${p.symbol}">${display}</td>
+        <td>${side}</td>
+        <td>${Math.abs(p.quantity)}</td>
+        <td>${fmt$(p.cost_basis || 0)}</td>
+        <td>${fmt$(p.current_price || 0)}</td>
+        <td>${fmt$(p.market_value || 0)}</td>
+        <td class="${plCls}">${pl >= 0 ? '+' : ''}${fmt$(pl)}</td>
+        <td class="${plCls}">${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%</td>
+        <td>
+          <button class="btn btn-red" style="padding:3px 8px;font-size:11px"
+            onclick="closePosition('${p.symbol}',${p.quantity})">CLOSE</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(err) {
+    document.getElementById('pos-tbody').innerHTML =
+      `<tr><td colspan="9" class="empty">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function closePosition(symbol, quantity) {
+  if (!confirm(`Close position: ${parseOCC(symbol)} (qty: ${Math.abs(quantity)})?`)) return;
+  try {
+    const res = await fetch(`/api/positions/${encodeURIComponent(symbol)}/close`, { method: 'POST' });
+    const d = await res.json();
+    if (d.order?.order?.status === 'ok' || d.status === 'ok' || res.ok) {
+      toast('Close order placed', 'ok');
+      setTimeout(loadPositions, 1500);
+    } else {
+      toast('Close failed: ' + JSON.stringify(d), 'err');
+    }
+  } catch(err) {
+    toast('Error: ' + err.message, 'err');
+  }
+}
+
+/* ── Order Modal ── */
+function openModal(optionSymbol, defaultSide, defaultPrice) {
+  modalContract = optionSymbol;
+  document.getElementById('modal-title').textContent =
+    defaultSide === 'sell_to_close' ? 'Close Position' : 'Place Option Order';
+  document.getElementById('modal-contract').innerHTML =
+    `<b>${parseOCC(optionSymbol)}</b><br><span style="font-size:10px">${optionSymbol}</span>`;
+  document.getElementById('modal-side').value = defaultSide;
+  document.getElementById('modal-type').value = 'limit';
+  document.getElementById('modal-price').value = defaultPrice ? defaultPrice.toFixed(2) : '';
+  document.getElementById('modal-qty').value = 1;
+  togglePriceRow();
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  modalContract = null;
+}
+document.getElementById('modal-type').addEventListener('change', togglePriceRow);
+function togglePriceRow() {
+  const show = document.getElementById('modal-type').value === 'limit';
+  document.getElementById('modal-price-row').style.display = show ? '' : 'none';
+}
+
+async function submitOrder() {
+  if (!modalContract) return;
+  const side  = document.getElementById('modal-side').value;
+  const qty   = parseInt(document.getElementById('modal-qty').value) || 1;
+  const type  = document.getElementById('modal-type').value;
+  const price = type === 'limit' ? parseFloat(document.getElementById('modal-price').value) : null;
+
+  if (type === 'limit' && (!price || price <= 0)) {
+    toast('Enter a valid limit price', 'err'); return;
+  }
+  const btn = document.getElementById('modal-submit');
+  btn.disabled = true; btn.textContent = 'Placing...';
+
+  try {
+    const body = { option_symbol: modalContract, side, quantity: qty, order_type: type };
+    if (price) body.price = price;
+    const res = await fetch('/api/options/orders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = await res.json();
+    if (d.order?.order?.status === 'ok' || d.status === 'ok' || res.ok) {
+      toast(`Order placed: ${side} ${qty}x ${parseOCC(modalContract)}`, 'ok');
+      closeModal();
+      setTimeout(loadPositions, 1500);
+    } else {
+      toast('Order failed: ' + (d.detail || JSON.stringify(d)), 'err');
+    }
+  } catch(err) {
+    toast('Error: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Submit Order';
+  }
+}
+
+/* Close modal on overlay click */
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+
+/* ── Helpers ── */
+function fmt$(n) {
+  if (n == null || isNaN(n)) return '—';
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtN(n) {
+  if (n == null || isNaN(n)) return '—';
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return String(n);
+}
+const OCC = /^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/;
+function parseOCC(sym) {
+  const m = sym.match(OCC);
+  if (!m) return sym;
+  const root = m[1], yy = m[2], mm = m[3], dd = m[4];
+  const type = m[5] === 'C' ? 'Call' : 'Put';
+  const strike = (parseInt(m[6], 10) / 1000).toFixed(0);
+  return `${root} $${strike}${m[5]} ${mm}/${dd}/${yy}`;
+}
+
+/* ── Toast ── */
+let toastTimer;
+function toast(msg, kind = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+/* ── Init ── */
+loadPositions();
+
+/* Reload positions every 60s */
+setInterval(loadPositions, 60000);
+</script>
+</body>
+</html>

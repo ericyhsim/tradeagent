@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Secrets
+.env
+
+# Logs & runtime state
+logs/
+*.log
+*.json.bak
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
