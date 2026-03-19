@@ -1320,18 +1320,21 @@ function posRow(p) {
   const isOpt = p.is_option;
   const sym   = p.symbol;
   const disp  = isOpt ? parseOCC(sym).display : sym;
+  const closingBadge = p.pending_close
+    ? `<span class="badge" style="margin-left:6px;font-size:9px;background:var(--yellow,#f59e0b);color:#000" title="Close order #${p.pending_order_id||''} pending (${p.pending_close_qty||''}x ${p.pending_close_type||'exit'})">CLOSING…</span>`
+    : '';
   return `
-    <tr>
-      <td><span style="font-weight:600;color:${pl>=0?'var(--green)':'var(--red)'}">${disp}</span>${isOpt?'<span class="badge bp" style="margin-left:6px;font-size:9px">OPT</span>':''}</td>
+    <tr style="${p.pending_close ? 'opacity:0.7' : ''}">
+      <td><span style="font-weight:600;color:${pl>=0?'var(--green)':'var(--red)'}">${disp}</span>${isOpt?'<span class="badge bp" style="margin-left:6px;font-size:9px">OPT</span>':''}${closingBadge}</td>
       <td style="color:var(--text2)">${isOpt ? 'Option' : 'Equity'}</td>
       <td><span class="badge ${side==='LONG'?'bg':'br'}">${side}</span></td>
-      <td>${Math.abs(p.quantity)}</td>
+      <td>${Math.abs(p.quantity)}${p.pending_close ? `<span style="font-size:9px;color:var(--text3)"> (${p.pending_close_qty} closing)</span>` : ''}</td>
       <td style="font-family:var(--mono)">$${costPerShare}/sh</td>
       <td style="font-family:var(--mono)">${p.current_price ? '$'+p.current_price.toFixed(2) : '—'}</td>
       <td style="font-family:var(--mono)">${p.market_value ? '$'+p.market_value.toLocaleString(undefined,{maximumFractionDigits:2}) : '—'}</td>
       <td style="font-family:var(--mono);color:${c};font-weight:600">${sg}$${Math.abs(pl).toLocaleString(undefined,{maximumFractionDigits:2})} <span style="font-size:10px">(${sg}${Math.abs(plPct).toFixed(1)}%)</span></td>
       <td>
-        <button class="close-btn" onclick="closePosition('${sym}',${p.quantity})">CLOSE</button>
+        <button class="close-btn" onclick="closePosition('${sym}',${p.quantity})" ${p.pending_close?'disabled title="Close order already pending"':''}>CLOSE</button>
         ${!isOpt ? `<button class="add-btn" onclick="addToPosition('${sym}','${side}')">ADD</button>` : ''}
       </td>
     </tr>`;

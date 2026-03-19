@@ -107,6 +107,7 @@ state = {
     "signal_log":     {},   # symbol → {signal_id, alert_dict} for feedback tracking
     "agent_views":    {},   # symbol → latest per-agent views (for UI)
     "scale_targets":  {},   # option_symbol → ScaleTargets (for tiered exit monitoring)
+    "pending_closes": {},   # option_symbol → {order_id, qty, type, placed_at}
 }
 
 
@@ -439,6 +440,35 @@ async def monitor_exits():
         if not is_market_open() or not tradier:
             continue
         try:
+            # ── Resolve any pending close orders first ─────────────────
+            # Check Tradier order status for every tracked pending close.
+            # If the order filled → confirm the scale. If cancelled/rejected
+            # → clear it so we can retry. If still open → leave it alone.
+            if state["pending_closes"]:
+                all_orders = await asyncio.to_thread(tradier.get_orders)
+                order_map  = {str(o.get("id")): o for o in (all_orders or [])}
+                for _sym, pend in list(state["pending_closes"].items()):
+                    oid  = str(pend.get("order_id", ""))
+                    ordr = order_map.get(oid, {})
+                    ostatus = ordr.get("status", "").lower()
+                    if ostatus in ("filled", "partially_filled"):
+                        filled_qty = int(ordr.get("filled_quantity") or ordr.get("quantity") or 0)
+                        add_log("ExitMgr",
+                            f"Order #{oid} FILLED: {filled_qty}x {_sym} "
+                            f"({pend.get('type','exit')})")
+                        state["pending_closes"].pop(_sym, None)
+                    elif ostatus in ("canceled", "rejected", "expired"):
+                        add_log("ExitMgr",
+                            f"Order #{oid} {ostatus} for {_sym} — will retry",
+                            "warning")
+                        state["pending_closes"].pop(_sym, None)
+                        # Also un-fill the scale so monitor can retry
+                        sc = state["scale_targets"].get(_sym)
+                        if sc:
+                            for scale in [sc.scale1, sc.scale2, sc.scale3]:
+                                if getattr(scale, "order_id", None) == oid:
+                                    scale.filled = False
+
             raw_positions = await asyncio.to_thread(tradier.get_positions)
             positions, _ = await _enrich_positions(raw_positions)
             if not positions:
@@ -485,6 +515,10 @@ async def monitor_exits():
 
                 pnl_pct = (current_px - scales.cost_basis) / scales.cost_basis
 
+                # ── Skip if a close order is already pending ───────────────
+                if sym in state["pending_closes"]:
+                    continue
+
                 # ── Stop-loss: close full position if down > 50% ──────────
                 # Option has lost too much premium — setup is invalidated.
                 all_filled = scales.scale1.filled and scales.scale2.filled and scales.scale3.filled
@@ -495,10 +529,17 @@ async def monitor_exits():
                         sym, "sell_to_close", qty_held, "limit", sell_px, "day",
                     )
                     if result and result.get("order", {}).get("status") == "ok":
-                        scales.scale1.filled = scales.scale2.filled = scales.scale3.filled = True
+                        order_id = result.get("order", {}).get("id")
+                        state["pending_closes"][sym] = {
+                            "order_id":  order_id,
+                            "qty":       qty_held,
+                            "type":      "stop_loss",
+                            "placed_at": datetime.now().isoformat(),
+                        }
                         add_log("ExitMgr",
-                            f"STOP LOSS: closed {qty_held}x {sym} @ ${sell_px:.2f} "
-                            f"({pnl_pct:+.0%}) — premium >50% loss", "warning")
+                            f"STOP LOSS order placed: {qty_held}x {sym} @ ${sell_px:.2f} "
+                            f"({pnl_pct:+.0%}) — premium >50% loss — order #{order_id}",
+                            "warning")
                         await broadcast({"type": "stop_loss", "data": {
                             "symbol": scales.underlying, "option_symbol": sym,
                             "qty": qty_held, "price": sell_px,
@@ -536,17 +577,27 @@ async def monitor_exits():
                     )
                     if result and result.get("order", {}).get("status") == "ok":
                         from datetime import datetime as _dt
-                        scale.filled    = True
+                        order_id = result.get("order", {}).get("id")
+                        scale.order_id  = order_id
                         scale.filled_at = _dt.now().isoformat()
+                        state["pending_closes"][sym] = {
+                            "order_id":  order_id,
+                            "qty":       scale.qty,
+                            "type":      scale_name,
+                            "placed_at": _dt.now().isoformat(),
+                        }
                         add_log("ExitMgr",
-                            f"{scale_name.upper()} filled: sold {scale.qty}x {sym} "
-                            f"@ ${sell_px:.2f} ({pnl_pct:+.0%}) — {reason}")
+                            f"{scale_name.upper()} close order placed: {scale.qty}x {sym} "
+                            f"@ ${sell_px:.2f} ({pnl_pct:+.0%}) — {reason} — order #{order_id}")
                         await broadcast({"type": "scale_exit", "data": {
                             "symbol": underlying, "option_symbol": sym,
                             "scale": scale_name, "qty": scale.qty,
                             "price": sell_px, "pnl_pct": round(pnl_pct, 3),
                             "reason": reason,
                         }})
+                        # Mark filled only after we confirm via order status next cycle
+                        # but prevent re-triggering in the meantime
+                        scale.filled = True
 
                         if scale_name == "scale3" and not scales.roll_evaluated:
                             scales.roll_evaluated = True
@@ -568,6 +619,7 @@ async def monitor_exits():
                             else:
                                 add_log("ExitMgr",
                                     f"No roll for {underlying} — {roll.rationale}")
+                        break  # one scale order per position per cycle
 
         except Exception as e:
             log.error(f"monitor_exits error: {e}")
@@ -833,6 +885,14 @@ async def _enrich_positions(positions: list[dict]) -> tuple[list[dict], float]:
             pos["unrealized_pl_pct"] = unpl_pct
             pos["is_option"]         = is_option_symbol(sym)
             net_pl += unpl
+
+        # Annotate with pending close order info so UI can show "closing" status
+        pend = state["pending_closes"].get(sym)
+        if pend:
+            pos["pending_close"]     = True
+            pos["pending_close_qty"] = pend.get("qty", 0)
+            pos["pending_close_type"] = pend.get("type", "exit")
+            pos["pending_order_id"]  = pend.get("order_id")
 
         enriched.append(pos)
     return enriched, round(net_pl, 2)
