@@ -427,13 +427,16 @@ async def scan_scheduler():
 
 async def monitor_exits():
     """
-    Background task: checks open options positions against scale targets
-    and places partial close orders when thresholds are crossed.
-    Runs every 45 seconds during market hours.
+    Background task: checks open options positions every 45s during market hours.
+
+    For each option position:
+      1. Auto-bootstraps scale targets if missing (handles restarts + manual trades).
+      2. Stop-loss: closes entire position if option is down > 50% (setup invalidated).
+      3. Scale-out: partial closes at 30-40% / 55-70% / 100-120% profit tiers.
     """
     while True:
         await asyncio.sleep(45)
-        if not is_market_open() or not tradier or not state["scale_targets"]:
+        if not is_market_open() or not tradier:
             continue
         try:
             raw_positions = await asyncio.to_thread(tradier.get_positions)
@@ -445,25 +448,69 @@ async def monitor_exits():
                 sym = pos.get("symbol", "")
                 if not is_option_symbol(sym):
                     continue
+
+                current_px = pos.get("current_price", 0)  # mid price from _enrich_positions
+                qty_held   = int(pos.get("quantity", 0))
+                if not current_px or qty_held <= 0:
+                    continue
+
+                # ── Auto-bootstrap missing scale targets ───────────────────
+                # Handles: server restarts, manually placed trades, any position
+                # opened before scale targets were stored.
+                if sym not in state["scale_targets"]:
+                    m = re.match(r'^([A-Z]{1,6})\d{6}([CP])\d{8}$', sym)
+                    if not m:
+                        continue
+                    underlying_sym = m.group(1)
+                    direction_sym  = "call" if m.group(2) == "C" else "put"
+                    total_cost     = pos.get("cost_basis", 0)
+                    if not total_cost:
+                        continue
+                    per_share_cost = round(total_cost / (qty_held * 100), 4)
+                    state["scale_targets"][sym] = exit_manager.compute_scales(
+                        option_symbol = sym,
+                        underlying    = underlying_sym,
+                        direction     = direction_sym,
+                        cost_basis    = per_share_cost,
+                        qty           = qty_held,
+                        alert_target  = 0.0,  # unknown for manual trades
+                    )
+                    add_log("ExitMgr",
+                        f"Auto-registered {sym}: cost=${per_share_cost:.2f}/sh "
+                        f"qty={qty_held} dir={direction_sym}")
+
                 scales: ScaleTargets = state["scale_targets"].get(sym)
-                if not scales:
+                if not scales or scales.cost_basis <= 0:
                     continue
 
-                # Current P&L on the option itself
-                cost       = scales.cost_basis
-                current_px = pos.get("last_price", 0)
-                if not current_px or cost <= 0:
-                    continue
-                pnl_pct = (current_px - cost) / cost
+                pnl_pct = (current_px - scales.cost_basis) / scales.cost_basis
 
-                # Underlying data for momentum check
-                underlying  = scales.underlying
-                quote       = state["quotes"].get(underlying, {})
-                candles_5m  = await asyncio.to_thread(
-                    get_candles, underlying, "5m", 1)
+                # ── Stop-loss: close full position if down > 50% ──────────
+                # Option has lost too much premium — setup is invalidated.
+                all_filled = scales.scale1.filled and scales.scale2.filled and scales.scale3.filled
+                if pnl_pct < -0.50 and not all_filled:
+                    sell_px = max(round(current_px * 0.99, 2), 0.01)
+                    result  = await asyncio.to_thread(
+                        tradier.place_option_order,
+                        sym, "sell_to_close", qty_held, "limit", sell_px, "day",
+                    )
+                    if result and result.get("order", {}).get("status") == "ok":
+                        scales.scale1.filled = scales.scale2.filled = scales.scale3.filled = True
+                        add_log("ExitMgr",
+                            f"STOP LOSS: closed {qty_held}x {sym} @ ${sell_px:.2f} "
+                            f"({pnl_pct:+.0%}) — premium >50% loss", "warning")
+                        await broadcast({"type": "stop_loss", "data": {
+                            "symbol": scales.underlying, "option_symbol": sym,
+                            "qty": qty_held, "price": sell_px,
+                            "pnl_pct": round(pnl_pct, 3),
+                        }})
+                    continue
+
+                # ── Scale-out (profit taking) ──────────────────────────────
+                underlying    = scales.underlying
+                quote         = state["quotes"].get(underlying, {})
+                candles_5m    = await asyncio.to_thread(get_candles, underlying, "5m", 1)
                 underlying_px = float(quote.get("c", current_px))
-
-                qty_held = int(pos.get("quantity", 0))
 
                 for scale_name, scale in [
                     ("scale1", scales.scale1),
@@ -482,8 +529,7 @@ async def monitor_exits():
                     if not trigger:
                         continue
 
-                    # Place partial close order
-                    sell_px = round(current_px * 0.99, 2)  # slightly below mid
+                    sell_px = round(current_px * 0.99, 2)
                     result  = await asyncio.to_thread(
                         tradier.place_option_order,
                         sym, "sell_to_close", scale.qty, "limit", sell_px, "day",
@@ -494,7 +540,7 @@ async def monitor_exits():
                         scale.filled_at = _dt.now().isoformat()
                         add_log("ExitMgr",
                             f"{scale_name.upper()} filled: sold {scale.qty}x {sym} "
-                            f"@ ${sell_px:.2f} (+{pnl_pct:.0%}) — {reason}")
+                            f"@ ${sell_px:.2f} ({pnl_pct:+.0%}) — {reason}")
                         await broadcast({"type": "scale_exit", "data": {
                             "symbol": underlying, "option_symbol": sym,
                             "scale": scale_name, "qty": scale.qty,
@@ -502,7 +548,6 @@ async def monitor_exits():
                             "reason": reason,
                         }})
 
-                        # After scale3 — evaluate roll
                         if scale_name == "scale3" and not scales.roll_evaluated:
                             scales.roll_evaluated = True
                             proceeds = sell_px * scale.qty * 100
