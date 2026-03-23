@@ -51,7 +51,7 @@ load_dotenv(dotenv_path=_env_path, override=True)
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-from data.market import get_candles, get_quote, WATCHLIST, get_sp500_symbols, batch_prescreen, get_scan_universe
+from data.market import get_candles, get_quote, WATCHLIST
 from data.finnhub_client import FinnhubNewsClient
 from data.tradier_client import TradierClient, is_option_symbol
 from signals.engine import evaluate_symbol
@@ -365,7 +365,7 @@ async def run_scan():
         return
     state["scan_running"] = True
     add_log("Orchestrator",
-        f"Scan started — S&P500 universe | {'OPEN' if is_market_open() else 'CLOSED'}")
+        f"Scan started — {len(WATCHLIST)} symbols | {'OPEN' if is_market_open() else 'CLOSED'}")
 
     new_alerts = []
 
@@ -387,16 +387,8 @@ async def run_scan():
         if state["opening_equity"] else 0.0
     )
 
-    # Expand universe: S&P500 pre-screened to top candidates
-    from data.market import get_scan_universe, batch_prescreen
-    full_universe = get_scan_universe()
-    scan_symbols  = await asyncio.to_thread(batch_prescreen, full_universe, 75)
-    # Always include WATCHLIST core symbols
-    for w in reversed(WATCHLIST):
-        if w not in scan_symbols:
-            scan_symbols.insert(0, w)
-    scan_symbols = scan_symbols[:100]  # hard cap
-    add_log("Orchestrator", f"Scanning {len(scan_symbols)} symbols (S&P500 pre-screened)")
+    scan_symbols = list(WATCHLIST)
+    add_log("Orchestrator", f"Scanning {len(scan_symbols)} symbols (focused watchlist)")
 
     try:
         for symbol in scan_symbols:
@@ -475,9 +467,11 @@ async def run_scan():
 
 
 async def scan_scheduler():
+    """Scan every 15 minutes during market hours only (9:30–16:00 ET, Mon–Fri)."""
     while True:
-        await run_scan()
         await asyncio.sleep(60)
+        if is_market_open():
+            await run_scan()
 
 
 async def monitor_exits():

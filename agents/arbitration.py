@@ -21,18 +21,23 @@ from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-MIN_ANCHOR_CONF = 0.76
-MIN_CONSENSUS   = 0.64
+MIN_ANCHOR_CONF = 0.78   # momentum must be confident (raised from 0.76)
+MIN_CONSENSUS   = 0.70   # consensus bar raised — only high-conviction setups (from 0.64)
 MIN_RR          = 2.5
 
+# Simplified 3-agent system:
+#   momentum    — anchor + veto (must agree, provides entry/stop/target)
+#   quant       — confirming veto (ATR, vol, statistical edge)
+#   options_flow — confirming lift (smart money positioning)
+#   All others zeroed out — they added noise without improving win rate.
 BASE_WEIGHTS: dict[str, float] = {
     "momentum":     5.0,
-    "fundamental":  0.05,
-    "quant":        4.5,   # effective veto: if quant opposes, consensus drops below threshold
-    "sentiment":    0.05,
-    "macro":        0.05,
-    "options_flow": 2.0,   # strong positive lift (+0.25) — elevated; not a veto to preserve signal count
-    "stat_arb":     0.1,   # near-zero lift — effectively removed
+    "fundamental":  0.0,   # removed — no predictive value on intraday setups
+    "quant":        4.5,   # confirming veto
+    "sentiment":    0.0,   # removed — too lagged for our timeframe
+    "macro":        0.0,   # removed — macro regime handled by RegimeDetectionAgent
+    "options_flow": 2.5,   # elevated — smart money flow is the strongest confirmer
+    "stat_arb":     0.0,   # removed — near-zero historically, adds API overhead
 }
 
 # ── Regime presets ────────────────────────────────────────────────────────
@@ -43,22 +48,24 @@ BASE_WEIGHTS: dict[str, float] = {
 #   high_vol      — macro + options_flow dominate; stat_arb dangerous (correlations break)
 #   crisis        — macro + options_flow at max; fundamentals irrelevant in panic
 
+# Regime presets only adjust the 3 active agents.
+# Zeroed agents stay at 0 regardless of regime.
 REGIME_PRESETS: dict[str, dict[str, float]] = {
     "trending": {
-        "momentum": 6.0, "fundamental": 1.5, "quant": 0.8,
-        "sentiment": 1.0, "macro": 2.0, "options_flow": 2.0, "stat_arb": 0.5,
+        "momentum": 6.0, "fundamental": 0.0, "quant": 3.5,
+        "sentiment": 0.0, "macro": 0.0, "options_flow": 2.5, "stat_arb": 0.0,
     },
     "ranging": {
-        "momentum": 2.5, "fundamental": 2.5, "quant": 2.5,
-        "sentiment": 0.5, "macro": 1.0, "options_flow": 1.5, "stat_arb": 2.5,
+        "momentum": 4.0, "fundamental": 0.0, "quant": 5.5,
+        "sentiment": 0.0, "macro": 0.0, "options_flow": 2.5, "stat_arb": 0.0,
     },
     "high_volatility": {
-        "momentum": 2.0, "fundamental": 1.0, "quant": 1.5,
-        "sentiment": 0.5, "macro": 3.5, "options_flow": 3.5, "stat_arb": 0.5,
+        "momentum": 4.0, "fundamental": 0.0, "quant": 3.0,
+        "sentiment": 0.0, "macro": 0.0, "options_flow": 5.0, "stat_arb": 0.0,
     },
     "crisis": {
-        "momentum": 1.0, "fundamental": 0.5, "quant": 1.5,
-        "sentiment": 0.3, "macro": 5.0, "options_flow": 5.0, "stat_arb": 0.3,
+        "momentum": 3.0, "fundamental": 0.0, "quant": 3.0,
+        "sentiment": 0.0, "macro": 0.0, "options_flow": 6.0, "stat_arb": 0.0,
     },
 }
 

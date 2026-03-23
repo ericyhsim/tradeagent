@@ -14,30 +14,23 @@ from datetime import datetime, timedelta
 #   Proven winners kept; mega-caps, semis, ETFs removed (poor WR).
 #   Expanded with similar high-beta names in EV, crypto, fintech, consumer.
 WATCHLIST = [
-    # ── Proven top performers (backtest-validated) ─────────────────────────
-    "COIN",  "TSLA",  "LYFT",  "ORCL",  "META",
-    "SMCI",  "RBLX",  "NFLX",  "LCID",  "RIVN",
-
-    # ── EV / Clean energy (similar squeeze profile to LCID/RIVN) ──────────
-    "NIO",   "XPEV",  "CHPT",  "BLNK",
-
-    # ── Crypto / BTC miners (high-beta, squeeze-prone like COIN) ──────────
-    "MARA",  "RIOT",  "CLSK",  "HUT",
-
-    # ── Fintech / buy-now-pay-later (high-beta growth) ────────────────────
-    "AFRM",  "UPST",  "PYPL",  "NU",
-
-    # ── Consumer / gig economy (similar to LYFT) ──────────────────────────
-    "DASH",  "ABNB",  "PINS",  "ETSY",
-
-    # ── Streaming / gaming / media (similar to NFLX/RBLX) ────────────────
-    "WBD",   "EA",    "TTWO",  "SIRI",
-
-    # ── High-beta cloud / software (volatile, directional) ────────────────
-    "DDOG",  "SNOW",  "NET",   "ZS",    "OKTA",
-
-    # ── Speculative / meme-adjacent (squeeze-prone) ───────────────────────
-    "BYND",  "OPEN",  "DKNG",  "GME",
+    # Curated 15 — high-beta, high-options-volume, proven movers.
+    # Criteria: daily options volume >10k contracts, beta >1.5, squeeze-prone.
+    "TSLA",   # highest retail options volume, extreme beta
+    "COIN",   # crypto proxy, massive IV swings
+    "NVDA",   # AI momentum anchor, deep options chain
+    "META",   # high-beta mega-cap, reliable setups
+    "MARA",   # BTC miner, extreme beta (2-5x BTC moves)
+    "RIOT",   # BTC miner, high squeeze potential
+    "RBLX",   # growth proxy, strong options flow
+    "LCID",   # EV, extreme beta, high short interest
+    "RIVN",   # EV, high-beta, squeeze history
+    "SMCI",   # AI infrastructure, volatile
+    "AFRM",   # fintech, extreme beta (earnings swings 20-40%)
+    "GME",    # meme/squeeze, very high options activity
+    "DKNG",   # high-beta consumer speculative
+    "HOOD",   # crypto/retail broker, high beta
+    "PLTR",   # AI/defense, high retail interest and options volume
 ]
 
 # ── S&P 500 symbol cache (populated lazily) ──
