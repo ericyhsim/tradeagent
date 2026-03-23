@@ -15,14 +15,19 @@ import logging
 log = logging.getLogger(__name__)
 
 MIN_RISK_FRACTION = 0.005
-MAX_RISK_FRACTION = 0.025
+MAX_RISK_FRACTION = 0.020   # 2% max per trade (tighter cap)
 DEFAULT_HALF_KELLY = 0.01
 
+# Regime-based sizing multipliers.
+# trending: size up if direction matches the trend (handled by ArbitrationAgent
+#   which only passes signals aligned with regime). Size at full Kelly.
+# ranging: market has no clear direction — reduce size, many false breakouts.
+# volatile: extreme ATR / VIX spike — reduce size aggressively, wider stops hurt.
 REGIME_SCALE: dict[str, float] = {
-    "trending_up":   1.0,
-    "trending_down": 1.0,
-    "ranging":       0.8,
-    "volatile":      0.6,
+    "trending_up":   1.0,   # full size — momentum + quant aligned
+    "trending_down": 1.0,   # full size — iv_squeeze puts aligned with downtrend
+    "ranging":       0.5,   # half size — no trend, high false-positive rate
+    "volatile":      0.4,   # 40% size — wide spreads, unpredictable fills
 }
 
 

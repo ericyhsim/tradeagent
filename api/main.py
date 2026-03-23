@@ -255,10 +255,18 @@ async def _find_option_and_trade(symbol: str, direction: str, entry: float,
     if not opt_symbol or ask <= 0:
         return False
 
-    cost_per_contract = ask * 100
+    bid = contract.get("bid", 0) or 0
+    mid = round((bid + ask) / 2, 2) if bid else ask
+
+    # Limit at the bid — fills near the bottom of the spread.
+    # If there's no bid (illiquid), fall back to 5% below ask.
+    # Missing a fill is fine; getting a bad fill at ask+2% is not.
+    limit_price       = round(bid if bid >= 0.05 else mid * 0.95, 2)
+    limit_price       = max(limit_price, 0.05)  # Tradier minimum
+
+    cost_per_contract = mid * 100   # size based on mid, not the limit price
     num_contracts     = max(1, int(risk_dollars / cost_per_contract))
     num_contracts     = min(num_contracts, 10)
-    limit_price       = round(ask * 1.02, 2)
 
     result = await asyncio.to_thread(
         tradier.place_option_order,
@@ -268,8 +276,8 @@ async def _find_option_and_trade(symbol: str, direction: str, entry: float,
     if result and result.get("order", {}).get("status") == "ok":
         order_id = result["order"]["id"]
         add_log("Execution",
-            f"Options BTO: {num_contracts}x {opt_symbol} @ ${limit_price:.2f} "
-            f"| strike ${strike} exp {target_exp} δ={delta} | #{order_id}")
+            f"Options BTO: {num_contracts}x {opt_symbol} lmt ${limit_price:.2f} "
+            f"(bid=${bid:.2f} ask=${ask:.2f}) | strike ${strike} exp {target_exp} δ={delta} | #{order_id}")
         await broadcast({"type": "trade_placed", "data": {
             "symbol": symbol, "option_symbol": opt_symbol,
             "side": "buy_to_open", "contracts": num_contracts,
