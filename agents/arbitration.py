@@ -21,8 +21,9 @@ from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-MIN_ANCHOR_CONF = 0.78   # momentum must be confident (raised from 0.76)
-MIN_CONSENSUS   = 0.70   # consensus bar raised — only high-conviction setups (from 0.64)
+MIN_ANCHOR_CONF = 0.76   # momentum anchor confidence floor
+MIN_CONSENSUS   = 0.62   # calibrated for 3-agent denominator (momentum=5, quant=4.5, options_flow=2.5)
+                         # requires momentum + quant agreement, or momentum + options_flow + neutral quant
 MIN_RR          = 2.5
 
 # Simplified 3-agent system:
