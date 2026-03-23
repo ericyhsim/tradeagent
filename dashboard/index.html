@@ -113,7 +113,7 @@ nav{padding:8px 12px;flex:1;}
 .sig-chip.oppose{background:var(--red-dim);color:var(--red);border-color:rgba(255,77,106,.2);}
 .sig-chip.neutral{background:rgba(245,166,35,.10);color:var(--amber);border-color:rgba(245,166,35,.25);}
 /* Resizable dashboard signal card */
-.sig-list-resizable{padding:8px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;min-height:180px;}
+.sig-list-resizable{padding:8px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;min-height:120px;max-height:420px;}
 .list-scroll{padding:8px;display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;}
 .empty{padding:24px;text-align:center;color:var(--text3);font-family:var(--mono);font-size:11px;}
 
@@ -125,7 +125,7 @@ nav{padding:8px 12px;flex:1;}
 .chart-wrap{padding:10px 16px 14px;height:160px;}
 
 /* AGENTS */
-.agent-rows{padding:10px;display:flex;flex-direction:column;gap:6px;}
+.agent-rows{padding:10px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:480px;}
 .ag-row{padding:10px 12px;border-radius:var(--rs);background:var(--bg3);border:1px solid var(--border);}
 .ag-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
 .ag-name{font-size:11px;font-weight:600;}
@@ -571,7 +571,7 @@ table::-webkit-scrollbar{width:4px;}
         <span class="ct">Agent Watchlists — Top 10 per agent</span>
         <span style="font-size:10px;color:var(--text3);font-family:var(--mono)" id="agWatchTs">—</span>
       </div>
-      <div id="agWatchGrid" style="padding:10px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
+      <div id="agWatchGrid" style="padding:10px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;overflow-y:auto;max-height:400px">
         <span style="font-size:11px;color:var(--text3);font-family:var(--mono);grid-column:1/-1">Run a scan to populate agent watchlists</span>
       </div>
     </div>
@@ -1250,12 +1250,17 @@ function signalRow(s) {
   const consPct   = s.consensus_pct || conf;
   const consColor = consPct >= 75 ? 'var(--green)' : consPct >= 60 ? 'var(--amber)' : 'var(--red)';
 
+  const sigTime = s.timestamp
+    ? new Date(s.timestamp).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false})
+    : null;
+
   return `
     <div class="sig-row">
       <div class="sig-row-main sig-cols" onclick="execTrade('${s.symbol}','${s.direction}',${s.entry},${s.stop})">
         <div>
           <div class="sig-ticker ${s.direction}">${s.symbol}</div>
           <div style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-top:2px">${s.timeframe || 'weekly'}</div>
+          ${sigTime ? `<div style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-top:1px">⏱ ${sigTime}</div>` : ''}
         </div>
         <div>
           <div class="sig-setup-name">${setup.charAt(0).toUpperCase()+setup.slice(1)}</div>
@@ -1362,8 +1367,12 @@ function filterSignals() {
   renderSignals(filtered, 'sigFullList');
 }
 
-function sortByConf(arr) {
+function sortNewest(arr) {
   return [...arr].sort((a, b) => {
+    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    if (tb !== ta) return tb - ta;
+    // tiebreak by confidence
     const ca = a.confidence_pct || Math.round((a.confidence||0)*100);
     const cb = b.confidence_pct || Math.round((b.confidence||0)*100);
     return cb - ca;
@@ -1371,7 +1380,7 @@ function sortByConf(arr) {
 }
 
 function updateSignals(signals) {
-  allSignals = sortByConf(signals);
+  allSignals = sortNewest(signals);
   const n = allSignals.length;
   document.getElementById('navSignalCount').textContent = n;
   document.getElementById('sigCountBadge').textContent = n + ' SIGNALS';
