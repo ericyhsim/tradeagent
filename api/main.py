@@ -507,15 +507,31 @@ async def monitor_exits():
                         state["pending_closes"].pop(_sym, None)
                     elif ostatus in ("canceled", "rejected", "expired"):
                         add_log("ExitMgr",
-                            f"Order #{oid} {ostatus} for {_sym} — will retry",
+                            f"Order #{oid} {ostatus} for {_sym} — holding 10min before retry",
                             "warning")
-                        state["pending_closes"].pop(_sym, None)
-                        # Also un-fill the scale so monitor can retry
+                        # Replace with a timed hold — prevents immediate flood retry
+                        state["pending_closes"][_sym] = {
+                            "order_id":  None,
+                            "qty":       pend.get("qty"),
+                            "type":      pend.get("type", "exit") + "_retry_hold",
+                            "placed_at": datetime.now().isoformat(),
+                        }
+                        # Un-fill scale so monitor retries after hold expires
                         sc = state["scale_targets"].get(_sym)
                         if sc:
                             for scale in [sc.scale1, sc.scale2, sc.scale3]:
                                 if getattr(scale, "order_id", None) == oid:
                                     scale.filled = False
+                    # Clear retry_hold entries older than 10 minutes
+                    for _sym, pend in list(state["pending_closes"].items()):
+                        if "_retry_hold" in pend.get("type", "") and pend.get("order_id") is None:
+                            placed = pend.get("placed_at", "")
+                            try:
+                                age = (datetime.now() - datetime.fromisoformat(placed)).seconds
+                                if age > 600:
+                                    state["pending_closes"].pop(_sym, None)
+                            except Exception:
+                                state["pending_closes"].pop(_sym, None)
 
             raw_positions = await asyncio.to_thread(tradier.get_positions)
             positions, _ = await _enrich_positions(raw_positions)
@@ -568,13 +584,12 @@ async def monitor_exits():
                     continue
 
                 # ── Stop-loss: close full position if down > 50% ──────────
-                # Option has lost too much premium — setup is invalidated.
+                # Use market order — guaranteed fill regardless of spread.
                 all_filled = scales.scale1.filled and scales.scale2.filled and scales.scale3.filled
                 if pnl_pct < -0.50 and not all_filled:
-                    sell_px = max(round(current_px * 0.99, 2), 0.01)
                     result  = await asyncio.to_thread(
                         tradier.place_option_order,
-                        sym, "sell_to_close", qty_held, "limit", sell_px, "day",
+                        sym, "sell_to_close", qty_held, "market", None, "day",
                     )
                     if result and result.get("order", {}).get("status") == "ok":
                         order_id = result.get("order", {}).get("id")
@@ -585,14 +600,24 @@ async def monitor_exits():
                             "placed_at": datetime.now().isoformat(),
                         }
                         add_log("ExitMgr",
-                            f"STOP LOSS order placed: {qty_held}x {sym} @ ${sell_px:.2f} "
+                            f"STOP LOSS market order placed: {qty_held}x {sym} "
                             f"({pnl_pct:+.0%}) — premium >50% loss — order #{order_id}",
                             "warning")
                         await broadcast({"type": "stop_loss", "data": {
                             "symbol": scales.underlying, "option_symbol": sym,
-                            "qty": qty_held, "price": sell_px,
-                            "pnl_pct": round(pnl_pct, 3),
+                            "qty": qty_held, "pnl_pct": round(pnl_pct, 3),
                         }})
+                    else:
+                        # Order rejected — don't retry for 10 min to avoid flooding
+                        state["pending_closes"][sym] = {
+                            "order_id":  None,
+                            "qty":       qty_held,
+                            "type":      "stop_loss_retry_hold",
+                            "placed_at": datetime.now().isoformat(),
+                        }
+                        add_log("ExitMgr",
+                            f"STOP LOSS order rejected for {sym} — holding 10min before retry",
+                            "warning")
                     continue
 
                 # ── Scale-out (profit taking) ──────────────────────────────
@@ -618,10 +643,9 @@ async def monitor_exits():
                     if not trigger:
                         continue
 
-                    sell_px = round(current_px * 0.99, 2)
                     result  = await asyncio.to_thread(
                         tradier.place_option_order,
-                        sym, "sell_to_close", scale.qty, "limit", sell_px, "day",
+                        sym, "sell_to_close", scale.qty, "market", None, "day",
                     )
                     if result and result.get("order", {}).get("status") == "ok":
                         from datetime import datetime as _dt
@@ -635,8 +659,8 @@ async def monitor_exits():
                             "placed_at": _dt.now().isoformat(),
                         }
                         add_log("ExitMgr",
-                            f"{scale_name.upper()} close order placed: {scale.qty}x {sym} "
-                            f"@ ${sell_px:.2f} ({pnl_pct:+.0%}) — {reason} — order #{order_id}")
+                            f"{scale_name.upper()} market close placed: {scale.qty}x {sym} "
+                            f"({pnl_pct:+.0%}) — {reason} — order #{order_id}")
                         await broadcast({"type": "scale_exit", "data": {
                             "symbol": underlying, "option_symbol": sym,
                             "scale": scale_name, "qty": scale.qty,
@@ -1125,7 +1149,7 @@ async def close_position(symbol: str):
         return JSONResponse({"error": "Close order failed"}, status_code=502)
 
     pos_type = "option" if is_option_symbol(sym) else "equity"
-    add_log("Execution", f"Closed {pos_type} position: {sym} ({qty:+d} shares/contracts)")
+    add_log("Execution", f"Closed {pos_type} position: {sym} ({int(qty):+d} shares/contracts)")
     await broadcast({"type": "position_closed", "symbol": sym})
 
     # ── Feedback: record outcome ──────────────────────────────────

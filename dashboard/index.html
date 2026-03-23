@@ -530,9 +530,9 @@ table::-webkit-scrollbar{width:4px;}
         </select>
         <select id="sigFilterSetup" onchange="filterSignals()" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:var(--rs);padding:6px 10px;font-family:var(--mono);font-size:11px;">
           <option value="">All setups</option>
-          <option value="bull_flag">Bull flag</option>
-          <option value="vwap_breakdown">VWAP breakdown</option>
-          <option value="iv_squeeze">IV squeeze</option>
+          <option value="iv_squeeze">IV Squeeze</option>
+          <option value="bull_flag">Bull Flag</option>
+          <option value="vwap_breakdown">VWAP Breakdown</option>
         </select>
         <button onclick="triggerScan(this)" style="padding:7px 16px;background:var(--blue-dim);color:var(--blue);border:1px solid rgba(74,158,255,.3);border-radius:var(--rs);font-family:var(--mono);font-size:11px;font-weight:600;cursor:pointer;">▶ SCAN NOW</button>
       </div>
@@ -655,7 +655,7 @@ table::-webkit-scrollbar{width:4px;}
     <div class="opt-controls">
       <label>Symbol</label>
       <select id="optSymbol" style="min-width:120px">
-        <option value="">— loading S&P 500... —</option>
+        <option value="">— select symbol —</option>
       </select>
       <label>Expiration</label>
       <select id="optExp" disabled style="min-width:130px">
@@ -804,7 +804,7 @@ table::-webkit-scrollbar{width:4px;}
       </div>
       <div id="btCustomWrap" style="display:none;flex-direction:column;gap:3px">
         <label>Symbols (comma-separated)</label>
-        <input type="text" id="btCustomSymbols" placeholder="AAPL, NVDA, TSLA" style="min-width:200px" />
+        <input type="text" id="btCustomSymbols" placeholder="TSLA, COIN, NVDA… (blank = watchlist)" style="min-width:200px" />
       </div>
       <div style="display:flex;flex-direction:column;gap:3px">
         <label>Lookback</label>
@@ -2126,17 +2126,17 @@ function onOptViewOpen() {
   optPosTimer = setInterval(loadOptPositions, 60000);
 }
 
-// populate SP500 dropdown
+// populate watchlist dropdown for options desk
 async function loadSP500() {
   const sel = document.getElementById('optSymbol');
   if (sel.options.length > 2) return; // already loaded
   try {
-    const d = await fetch(API+'/api/sp500').then(r=>r.json());
+    const d = await fetch(API+'/api/watchlist').then(r=>r.json());
     const syms = d.symbols || [];
     sel.innerHTML = '<option value="">— select symbol —</option>' +
       syms.map(s=>`<option value="${s}">${s}</option>`).join('');
   } catch(e) {
-    sel.innerHTML = '<option value="">Error loading symbols</option>';
+    sel.innerHTML = '<option value="">Error loading watchlist</option>';
   }
 }
 
